@@ -9,7 +9,7 @@ Thanks to [Team Tumbleweed](https://github.com/team-tumbleweed) for developing t
 
 To make a GSA go to the [Credentials Dashboard](https://console.cloud.google.com/apis/credentials). You will need to download the **.json key** and base64 encode it. You will use this string as the `credentials` input. To convert the *json* file to base64 without having to use an online tool (which is insecure), use this command:
 
-`echo -n $(cat credentials.json)| base64 -w 0`
+`base64 credentials.json -w0`
 
 On mac this the base64 by default opts for -w as 0, you can skip and just use base64 without any params.
 
@@ -41,6 +41,11 @@ file MimeType. If absent, Google Drive will attempt to automatically detect an a
 Required: **NO**
 
 If true, the target file name will be the complete source filename and `name` parameter will be ignored.
+
+## ``mirrorDirectoryStructure``
+Required: **NO**
+
+If true, the directory structure of the source file will be recreated relative to ``folderId``.
 
 ## ``namePrefix``
 Required: **NO**
@@ -90,5 +95,17 @@ jobs:
           folderId: ${{ secrets.folderId }}
           name: "documentation.zip" # optional string
           overwrite: "true" # optional boolean
+      - name: Make Directory Structure
+        run: |
+          mkdir -p w/x/y
+          date +%s > w/x/y/z
+      - name: Mirror Directory Structure
+        uses: adityak74/google-drive-upload-git-action@main
+        with:
+          credentials: ${{ secrets.DRIVE_CREDENTIALS }}
+          filename: w/x/y/z
+          folderId: ${{ secrets.folderId }}
+          overwrite: "true"
+          mirrorDirectoryStructure: "true"
           
 ```

@@ -26,6 +26,9 @@ inputs:
   useCompleteSourceFilenameAsName:
     description: 'If true, the target file name will be the source filename and name parameter will be ignored'
     required: false
+  mirrorDirectoryStructure:
+    description: 'If true, recreate the directory structure of the source file relative to the folderId'
+    required: false
   namePrefix:
     description: 'Prefix to be added to target filename'
     required: false

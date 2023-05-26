@@ -24,18 +24,27 @@ import (
 )
 
 const (
-	scope                 = "https://www.googleapis.com/auth/drive.file"
-	filenameInput         = "filename"
-	nameInput             = "name"
-	folderIdInput         = "folderId"
-	credentialsInput      = "credentials"
-	overwrite             = "false"
-	mimeTypeInput         = "mimeType"
-	useCompleteSourceName = "useCompleteSourceFilenameAsName"
-	namePrefixInput       = "namePrefix"
+	scope                    = "https://www.googleapis.com/auth/drive.file"
+	filenameInput            = "filename"
+	nameInput                = "name"
+	folderIdInput            = "folderId"
+	credentialsInput         = "credentials"
+	overwrite                = "false"
+	mimeTypeInput            = "mimeType"
+	useCompleteSourceName    = "useCompleteSourceFilenameAsName"
+	mirrorDirectoryStructure = "mirrorDirectoryStructure"
+	namePrefixInput          = "namePrefix"
 )
 
 func uploadToDrive(svc *drive.Service, filename string, folderId string, driveFile *drive.File, name string, mimeType string) {
+	fi, err := os.Lstat(filename)
+	if err != nil {
+		githubactions.Fatalf(fmt.Sprintf("lstat of file with filename: %v failed with error: %v", filename, err))
+	}
+	if fi.IsDir() {
+		fmt.Printf("%s is a directory. skipping upload.", filename)
+		return
+	}
 	file, err := os.Open(filename)
 	if err != nil {
 		githubactions.Fatalf(fmt.Sprintf("opening file with filename: %v failed with error: %v", filename, err))
@@ -109,6 +118,14 @@ func main() {
 		useCompleteSourceFilenameAsNameFlag, _ = strconv.ParseBool(useCompleteSourceFilenameAsName)
 	}
 
+	var mirrorDirectoryStructureFlag bool
+	mirrorDirectoryStructure := githubactions.GetInput(mirrorDirectoryStructure)
+	if mirrorDirectoryStructure == "" {
+		fmt.Println("mirrorDirectoryStructure is disabled.")
+		mirrorDirectoryStructureFlag = false
+	} else {
+		mirrorDirectoryStructureFlag, _ = strconv.ParseBool(mirrorDirectoryStructure)
+	}
 	// get filename prefix
 	filenamePrefix := githubactions.GetInput(namePrefixInput)
 
@@ -146,8 +163,19 @@ func main() {
 
 	useSourceFilename := len(files) > 1
 
+	// Save the folderId because it might get overwritten by createDriveDirectory
+	originalFolderId := folderId
 	for _, file := range files {
+		folderId = originalFolderId
 		var targetName string
+		fmt.Printf("Processing file %s\n", file)
+		if mirrorDirectoryStructureFlag {
+			directoryStructure := strings.Split(filepath.Dir(file), string(os.PathSeparator))
+			fmt.Printf("Mirroring directory structure: %v\n", directoryStructure)
+			for _, dir := range directoryStructure {
+				folderId, err = createDriveDirectory(svc, folderId, dir)
+			}
+		}
 		if useCompleteSourceFilenameAsNameFlag {
 			targetName = file
 		} else if useSourceFilename || name == "" {
@@ -162,6 +190,41 @@ func main() {
 		}
 		uploadFile(svc, file, folderId, targetName, mimeType, overwriteFlag)
 	}
+}
+
+func createDriveDirectory(svc *drive.Service, folderId string, name string) (string, error) {
+	fmt.Printf("Checking for existing folder %s\n", name)
+	r, err := svc.Files.List().Fields("files(name,id,mimeType,parents)").Q("name='" + name + "'" + " and mimeType='application/vnd.google-apps.folder'").IncludeItemsFromAllDrives(true).Corpora("allDrives").SupportsAllDrives(true).Do()
+	if err != nil {
+		log.Fatalf("Unable to check for folder : %v", err)
+		fmt.Println("Unable to check for folder")
+	}
+	foundFolders := 0
+	var nextFolderId string
+	for _, i := range r.Files {
+		for _, p := range i.Parents {
+			if p == folderId {
+				foundFolders++
+				fmt.Printf("Found existing folder %s.\n", name)
+				nextFolderId = i.Id
+			}
+		}
+	}
+	if foundFolders == 0 {
+		fmt.Printf("Creating folder: %s\n", name)
+		f := &drive.File{
+			Name:     name,
+			MimeType: "application/vnd.google-apps.folder",
+			Parents:  []string{folderId},
+		}
+		d, err := svc.Files.Create(f).Fields("id").SupportsAllDrives(true).Do()
+		if err != nil {
+			log.Fatalf("Unable to create folder : %v", err)
+			fmt.Println("Unable to create folder")
+		}
+		nextFolderId = d.Id
+	}
+	return nextFolderId, nil
 }
 
 func uploadFile(svc *drive.Service, filename string, folderId string, name string, mimeType string, overwriteFlag bool) {
